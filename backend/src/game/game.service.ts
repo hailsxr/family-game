@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { WsException } from '@nestjs/websockets';
-import { GameState, Player, Room } from './interfaces/game.interfaces';
+import { Family, GameState, Player, Room } from './interfaces/game.interfaces';
 import { generateRoomCode } from './utils/room-code';
 
 const MAX_PLAYERS = 10;
@@ -11,6 +11,11 @@ const MAX_NAME_LENGTH = 20;
 export class GameService {
   private rooms = new Map<string, Room>();
   private playerRoomMap = new Map<string, string>(); // socketId -> roomCode
+  private randomFn: () => number;
+
+  constructor(randomFn?: () => number) {
+    this.randomFn = randomFn ?? Math.random;
+  }
 
   createRoom(hostName: string, socketId: string): Room {
     this.validatePlayerName(hostName);
@@ -30,6 +35,11 @@ export class GameService {
       players: new Map([[socketId, host]]),
       hostId: socketId,
       createdAt: new Date(),
+      words: new Map(),
+      shuffledWords: [],
+      families: [],
+      currentTurnId: null,
+      turnOrder: [],
     };
 
     this.rooms.set(code, room);
@@ -104,8 +114,124 @@ export class GameService {
     return { room, player };
   }
 
+  startGame(socketId: string): Room {
+    const room = this.getRoomForPlayer(socketId);
+
+    if (room.hostId !== socketId) {
+      throw new WsException('Only the host can start the game');
+    }
+
+    if (room.state !== GameState.LOBBY) {
+      throw new WsException('Game can only be started from the lobby');
+    }
+
+    if (room.players.size < 2) {
+      throw new WsException('At least 2 players are required to start');
+    }
+
+    room.state = GameState.WORD_ENTRY;
+    room.words = new Map();
+
+    return room;
+  }
+
+  submitWord(
+    socketId: string,
+    word: string,
+  ): { room: Room; allSubmitted: boolean } {
+    const room = this.getRoomForPlayer(socketId);
+
+    if (room.state !== GameState.WORD_ENTRY) {
+      throw new WsException('Words can only be submitted during word entry');
+    }
+
+    if (room.words.has(socketId)) {
+      throw new WsException('You have already submitted a word');
+    }
+
+    const trimmed = word?.trim() ?? '';
+    if (trimmed.length === 0) {
+      throw new WsException('Word cannot be empty');
+    }
+    if (trimmed.length > 50) {
+      throw new WsException('Word must be 50 characters or fewer');
+    }
+
+    room.words.set(socketId, trimmed);
+
+    const allSubmitted = room.words.size === room.players.size;
+    if (allSubmitted) {
+      room.state = GameState.READING;
+      room.shuffledWords = this.fisherYatesShuffle(
+        Array.from(room.words.values()),
+      );
+    }
+
+    return { room, allSubmitted };
+  }
+
+  getShuffledWords(socketId: string): string[] {
+    const room = this.getRoomForPlayer(socketId);
+
+    const validStates = [GameState.READING, GameState.PLAYING, GameState.ENDED];
+    if (!validStates.includes(room.state)) {
+      throw new WsException('Words are not available in this state');
+    }
+
+    return room.shuffledWords;
+  }
+
+  advanceFromReading(socketId: string): Room {
+    const room = this.getRoomForPlayer(socketId);
+
+    if (room.hostId !== socketId) {
+      throw new WsException('Only the host can advance the game');
+    }
+
+    if (room.state !== GameState.READING) {
+      throw new WsException('Can only advance from reading state');
+    }
+
+    // Initialize families: each player is their own family
+    const playerIds = Array.from(room.players.keys());
+    room.families = playerIds.map(
+      (id): Family => ({ leaderId: id, memberIds: [id] }),
+    );
+
+    // Build shuffled turn order
+    room.turnOrder = this.fisherYatesShuffle([...playerIds]);
+    room.currentTurnId = room.turnOrder[0];
+
+    room.state = GameState.PLAYING;
+
+    return room;
+  }
+
   getRoom(code: string): Room | undefined {
     return this.rooms.get(code);
+  }
+
+  private getRoomForPlayer(socketId: string): Room {
+    const roomCode = this.playerRoomMap.get(socketId);
+    if (!roomCode) {
+      throw new WsException('Player is not in a room');
+    }
+
+    const room = this.rooms.get(roomCode);
+    if (!room) {
+      throw new WsException('Room not found');
+    }
+
+    return room;
+  }
+
+  private fisherYatesShuffle<T>(array: T[]): T[] {
+    const result = [...array];
+    for (let i = result.length - 1; i > 0; i--) {
+      const j = Math.floor(this.randomFn() * (i + 1));
+      [result[i], result[j]] = [result[j], result[i]];
+    }
+    return result;
   }
 
   private validatePlayerName(name: string): void {

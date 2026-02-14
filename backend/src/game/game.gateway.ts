@@ -10,15 +10,27 @@ import { UseFilters } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { GameService } from './game.service';
 import { WsExceptionFilter } from '../common/filters/ws-exception.filter';
-import { Room, Player } from './interfaces/game.interfaces';
+import { GameState, Room, Player } from './interfaces/game.interfaces';
+
+const READING_PLUS_STATES = [GameState.READING, GameState.PLAYING, GameState.ENDED];
 
 function serializeRoom(room: Room) {
-  return {
+  const serialized: Record<string, unknown> = {
     code: room.code,
     state: room.state,
     players: Array.from(room.players.values()).map(serializePlayer),
     hostId: room.hostId,
+    wordCount: room.words.size,
+    families: room.families,
+    currentTurnId: room.currentTurnId,
+    turnOrder: room.turnOrder,
   };
+
+  if (READING_PLUS_STATES.includes(room.state)) {
+    serialized.shuffledWords = room.shuffledWords;
+  }
+
+  return serialized;
 }
 
 function serializePlayer(player: Player) {
@@ -59,6 +71,40 @@ export class GameGateway implements OnGatewayDisconnect {
     );
     client.join(room.code);
     this.server.to(room.code).emit('player_joined', serializeRoom(room));
+  }
+
+  @SubscribeMessage('start_game')
+  handleStartGame(@ConnectedSocket() client: Socket) {
+    const room = this.gameService.startGame(client.id);
+    this.server.to(room.code).emit('state_changed', serializeRoom(room));
+  }
+
+  @SubscribeMessage('submit_word')
+  handleSubmitWord(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { word: string },
+  ) {
+    const { room, allSubmitted } = this.gameService.submitWord(
+      client.id,
+      data.word,
+    );
+    this.server.to(room.code).emit('word_submitted', {
+      playerId: client.id,
+      wordCount: room.words.size,
+      totalPlayers: room.players.size,
+    });
+    if (allSubmitted) {
+      this.server
+        .to(room.code)
+        .emit('reading_words', { words: room.shuffledWords });
+      this.server.to(room.code).emit('state_changed', serializeRoom(room));
+    }
+  }
+
+  @SubscribeMessage('advance_reading')
+  handleAdvanceReading(@ConnectedSocket() client: Socket) {
+    const room = this.gameService.advanceFromReading(client.id);
+    this.server.to(room.code).emit('state_changed', serializeRoom(room));
   }
 
   handleDisconnect(client: Socket) {

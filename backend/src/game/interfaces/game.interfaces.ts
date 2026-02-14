@@ -13,10 +13,20 @@ export interface Player {
   isHost: boolean;
 }
 
+export interface Family {
+  leaderId: string;
+  memberIds: string[];
+}
+
 export interface Room {
   code: string;
   state: GameState;
   players: Map<string, Player>;
   hostId: string;
   createdAt: Date;
+  words: Map<string, string>; // playerId → word
+  shuffledWords: string[];
+  families: Family[];
+  currentTurnId: string | null;
+  turnOrder: string[];
 }
