@@ -9,6 +9,7 @@ import {
 import { UseFilters } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
 import { GameService } from './game.service';
+import { GamePersistenceService } from '../persistence/game-persistence.service';
 import { WsExceptionFilter } from '../common/filters/ws-exception.filter';
 import { GameState, Room, Player } from './interfaces/game.interfaces';
 
@@ -47,7 +48,10 @@ export class GameGateway implements OnGatewayDisconnect {
   @WebSocketServer()
   server!: Server;
 
-  constructor(private readonly gameService: GameService) {}
+  constructor(
+    private readonly gameService: GameService,
+    private readonly gamePersistenceService: GamePersistenceService,
+  ) {}
 
   @SubscribeMessage('create_room')
   handleCreateRoom(
@@ -105,6 +109,39 @@ export class GameGateway implements OnGatewayDisconnect {
   handleAdvanceReading(@ConnectedSocket() client: Socket) {
     const room = this.gameService.advanceFromReading(client.id);
     this.server.to(room.code).emit('state_changed', serializeRoom(room));
+  }
+
+  @SubscribeMessage('make_guess')
+  handleMakeGuess(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { targetPlayerId: string; word: string },
+  ) {
+    const result = this.gameService.makeGuess(
+      client.id,
+      data.targetPlayerId,
+      data.word,
+    );
+
+    // Find room code for broadcasting
+    const room = Array.from(client.rooms).find((r) => r !== client.id);
+    if (room) {
+      this.server.to(room).emit('guess_result', result);
+
+      if (result.gameOver) {
+        const fullRoom = this.gameService.getRoom(room);
+        if (fullRoom) {
+          this.server.to(room).emit('state_changed', serializeRoom(fullRoom));
+
+          if (result.winner) {
+            this.gamePersistenceService
+              .persistEndedGame(fullRoom, result.winner.leaderId)
+              .catch((err) =>
+                console.error('Failed to persist game:', err),
+              );
+          }
+        }
+      }
+    }
   }
 
   handleDisconnect(client: Socket) {

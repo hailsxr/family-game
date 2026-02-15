@@ -1,7 +1,9 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Optional, Inject } from '@nestjs/common';
 import { WsException } from '@nestjs/websockets';
-import { Family, GameState, Player, Room } from './interfaces/game.interfaces';
+import { Family, GameState, GuessRecord, GuessResult, Player, Room } from './interfaces/game.interfaces';
 import { generateRoomCode } from './utils/room-code';
+
+export const RANDOM_FN = 'RANDOM_FN';
 
 const MAX_PLAYERS = 10;
 const MIN_NAME_LENGTH = 2;
@@ -13,7 +15,7 @@ export class GameService {
   private playerRoomMap = new Map<string, string>(); // socketId -> roomCode
   private randomFn: () => number;
 
-  constructor(randomFn?: () => number) {
+  constructor(@Optional() @Inject(RANDOM_FN) randomFn?: () => number) {
     this.randomFn = randomFn ?? Math.random;
   }
 
@@ -40,6 +42,7 @@ export class GameService {
       families: [],
       currentTurnId: null,
       turnOrder: [],
+      guesses: [],
     };
 
     this.rooms.set(code, room);
@@ -207,6 +210,104 @@ export class GameService {
     return room;
   }
 
+  makeGuess(socketId: string, targetPlayerId: string, word: string): GuessResult {
+    const room = this.getRoomForPlayer(socketId);
+
+    if (room.state !== GameState.PLAYING) {
+      throw new WsException('Guesses can only be made during play');
+    }
+
+    if (room.currentTurnId !== socketId) {
+      throw new WsException('It is not your turn');
+    }
+
+    const guesserFamily = this.findFamilyByLeader(room, socketId);
+    if (!guesserFamily) {
+      throw new WsException('You are not a family leader');
+    }
+
+    if (!room.players.has(targetPlayerId)) {
+      throw new WsException('Target player does not exist');
+    }
+
+    if (targetPlayerId === socketId) {
+      throw new WsException('You cannot guess yourself');
+    }
+
+    if (guesserFamily.memberIds.includes(targetPlayerId)) {
+      throw new WsException('Target is already in your family');
+    }
+
+    const trimmed = word?.trim() ?? '';
+    if (trimmed.length === 0) {
+      throw new WsException('Guess word cannot be empty');
+    }
+
+    const storedWord = room.words.get(targetPlayerId);
+    const correct = storedWord === trimmed;
+
+    const guessRecord: GuessRecord = {
+      guesserSocketId: socketId,
+      guessedSocketId: targetPlayerId,
+      guessedWord: trimmed,
+      wasCorrect: correct,
+      timestamp: new Date(),
+    };
+    room.guesses.push(guessRecord);
+
+    if (correct) {
+      const targetFamily = this.findFamilyByMember(room, targetPlayerId);
+
+      if (targetFamily.leaderId === targetPlayerId) {
+        // Merge entire target family into guesser's family
+        for (const memberId of targetFamily.memberIds) {
+          guesserFamily.memberIds.push(memberId);
+        }
+        room.families = room.families.filter((f) => f !== targetFamily);
+      } else {
+        // Move just the target player
+        targetFamily.memberIds = targetFamily.memberIds.filter(
+          (id) => id !== targetPlayerId,
+        );
+        guesserFamily.memberIds.push(targetPlayerId);
+      }
+
+      // Check win condition
+      if (room.families.length === 1) {
+        room.state = GameState.ENDED;
+        room.currentTurnId = null;
+
+        return {
+          correct: true,
+          guesserId: socketId,
+          targetPlayerId,
+          word: trimmed,
+          families: room.families,
+          currentTurnId: null,
+          gameOver: true,
+          winner: {
+            leaderId: guesserFamily.leaderId,
+            memberIds: guesserFamily.memberIds,
+          },
+        };
+      }
+
+      // Turn stays with guesser
+    } else {
+      this.advanceTurn(room);
+    }
+
+    return {
+      correct,
+      guesserId: socketId,
+      targetPlayerId,
+      word: trimmed,
+      families: room.families,
+      currentTurnId: room.currentTurnId,
+      gameOver: false,
+    };
+  }
+
   getRoom(code: string): Room | undefined {
     return this.rooms.get(code);
   }
@@ -223,6 +324,32 @@ export class GameService {
     }
 
     return room;
+  }
+
+  private advanceTurn(room: Room): void {
+    const currentIndex = room.turnOrder.indexOf(room.currentTurnId!);
+    const len = room.turnOrder.length;
+    const leaderIds = new Set(room.families.map((f) => f.leaderId));
+
+    for (let offset = 1; offset < len; offset++) {
+      const candidate = room.turnOrder[(currentIndex + offset) % len];
+      if (leaderIds.has(candidate)) {
+        room.currentTurnId = candidate;
+        return;
+      }
+    }
+  }
+
+  private findFamilyByMember(room: Room, playerId: string): Family {
+    const family = room.families.find((f) => f.memberIds.includes(playerId));
+    if (!family) {
+      throw new WsException('Player is not in any family');
+    }
+    return family;
+  }
+
+  private findFamilyByLeader(room: Room, playerId: string): Family | undefined {
+    return room.families.find((f) => f.leaderId === playerId);
   }
 
   private fisherYatesShuffle<T>(array: T[]): T[] {

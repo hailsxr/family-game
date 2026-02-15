@@ -18,6 +18,25 @@ export interface Family {
   memberIds: string[];
 }
 
+export interface GuessResult {
+  correct: boolean;
+  guesserId: string;
+  targetPlayerId: string;
+  word: string;
+  families: Family[];
+  currentTurnId: string | null;
+  gameOver: boolean;
+  winner?: { leaderId: string; memberIds: string[] };
+}
+
+export interface GuessRecord {
+  guesserSocketId: string;
+  guessedSocketId: string;
+  guessedWord: string;
+  wasCorrect: boolean;
+  timestamp: Date;
+}
+
 export interface Room {
   code: string;
   state: GameState;
@@ -29,4 +48,5 @@ export interface Room {
   families: Family[];
   currentTurnId: string | null;
   turnOrder: string[];
+  guesses: GuessRecord[];
 }
