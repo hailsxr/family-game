@@ -244,7 +244,7 @@ export class GameService {
     }
 
     const storedWord = room.words.get(targetPlayerId);
-    const correct = storedWord === trimmed;
+    const correct = storedWord?.toLowerCase() === trimmed.toLowerCase();
 
     const guessRecord: GuessRecord = {
       guesserSocketId: socketId,

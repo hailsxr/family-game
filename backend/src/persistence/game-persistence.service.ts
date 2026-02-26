@@ -20,7 +20,7 @@ export class GamePersistenceService {
   async persistEndedGame(
     room: Room,
     winnerLeaderId: string,
-  ): Promise<void> {
+  ): Promise<string> {
     const winnerPlayer = room.players.get(winnerLeaderId);
     const winnerName = winnerPlayer?.name ?? 'Unknown';
 
@@ -69,5 +69,7 @@ export class GamePersistenceService {
       });
       await this.guessRepo.save(guessRecords);
     }
+
+    return savedGame.id;
   }
 }

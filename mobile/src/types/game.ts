@@ -37,3 +37,25 @@ export interface PlayerLeftPayload {
 export interface ErrorPayload {
   message: string;
 }
+
+export interface WordSubmittedPayload {
+  playerId: string;
+  wordCount: number;
+  totalPlayers: number;
+}
+
+export interface ReadingWordsPayload {
+  words: string[];
+}
+
+export interface GuessResult {
+  correct: boolean;
+  guesserId: string;
+  targetPlayerId: string;
+  word: string;
+  families: Family[];
+  currentTurnId: string | null;
+  gameOver: boolean;
+  winner?: { leaderId: string; memberIds: string[] };
+  gameId?: string;
+}

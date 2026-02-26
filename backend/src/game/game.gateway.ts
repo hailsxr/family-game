@@ -112,7 +112,7 @@ export class GameGateway implements OnGatewayDisconnect {
   }
 
   @SubscribeMessage('make_guess')
-  handleMakeGuess(
+  async handleMakeGuess(
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { targetPlayerId: string; word: string },
   ) {
@@ -124,23 +124,30 @@ export class GameGateway implements OnGatewayDisconnect {
 
     // Find room code for broadcasting
     const room = Array.from(client.rooms).find((r) => r !== client.id);
-    if (room) {
+    if (!room) return;
+
+    if (!result.gameOver) {
       this.server.to(room).emit('guess_result', result);
+      return;
+    }
 
-      if (result.gameOver) {
-        const fullRoom = this.gameService.getRoom(room);
-        if (fullRoom) {
-          this.server.to(room).emit('state_changed', serializeRoom(fullRoom));
-
-          if (result.winner) {
-            this.gamePersistenceService
-              .persistEndedGame(fullRoom, result.winner.leaderId)
-              .catch((err) =>
-                console.error('Failed to persist game:', err),
-              );
-          }
-        }
+    // Game over: persist first, then emit with gameId
+    const fullRoom = this.gameService.getRoom(room);
+    if (fullRoom && result.winner) {
+      try {
+        const gameId = await this.gamePersistenceService.persistEndedGame(
+          fullRoom,
+          result.winner.leaderId,
+        );
+        result.gameId = gameId;
+      } catch (err) {
+        console.error('Failed to persist game:', err);
       }
+    }
+
+    this.server.to(room).emit('guess_result', result);
+    if (fullRoom) {
+      this.server.to(room).emit('state_changed', serializeRoom(fullRoom));
     }
   }
 

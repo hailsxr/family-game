@@ -27,6 +27,7 @@ export interface GuessResult {
   currentTurnId: string | null;
   gameOver: boolean;
   winner?: { leaderId: string; memberIds: string[] };
+  gameId?: string;
 }
 
 export interface GuessRecord {

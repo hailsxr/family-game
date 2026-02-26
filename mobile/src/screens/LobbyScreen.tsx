@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,13 +10,20 @@ import {
 import { socketService } from '../services/socket.service';
 import { useGameStore, selectIsHost } from '../store/game.store';
 import {
+  GameState,
   SerializedRoom,
   PlayerLeftPayload,
   ErrorPayload,
 } from '../types/game';
 import type { LobbyScreenProps } from '../types/navigation';
+import { fonts, type Colors, type Shadows } from '../theme';
+import { useColors, useShadows } from '../theme-context';
 
 export default function LobbyScreen({ navigation }: LobbyScreenProps) {
+  const colors = useColors();
+  const shadowStyles = useShadows();
+  const styles = useMemo(() => createStyles(colors, shadowStyles), [colors, shadowStyles]);
+
   const room = useGameStore((s) => s.room);
   const mySocketId = useGameStore((s) => s.mySocketId);
   const isHost = useGameStore(selectIsHost);
@@ -33,8 +40,11 @@ export default function LobbyScreen({ navigation }: LobbyScreenProps) {
     };
 
     const handleStateChanged = (updatedRoom: unknown) => {
-      setRoom(updatedRoom as SerializedRoom);
-      Alert.alert('Game Started', 'The game state has changed. Future screens coming soon!');
+      const room = updatedRoom as SerializedRoom;
+      setRoom(room);
+      if (room.state === GameState.WORD_ENTRY) {
+        navigation.replace('WordEntry');
+      }
     };
 
     const handleError = (payload: unknown) => {
@@ -67,7 +77,7 @@ export default function LobbyScreen({ navigation }: LobbyScreenProps) {
   if (!room) {
     return (
       <View style={styles.container}>
-        <Text>No room data. Returning...</Text>
+        <Text style={styles.emptyText}>No room data. Returning...</Text>
       </View>
     );
   }
@@ -76,8 +86,10 @@ export default function LobbyScreen({ navigation }: LobbyScreenProps) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.codeLabel}>Room Code</Text>
-      <Text style={styles.code}>{room.code}</Text>
+      <View style={styles.codeCard}>
+        <Text style={styles.codeLabel}>Room Code</Text>
+        <Text style={styles.code}>{room.code}</Text>
+      </View>
 
       <Text style={styles.playersLabel}>
         Players ({playerCount})
@@ -126,80 +138,119 @@ export default function LobbyScreen({ navigation }: LobbyScreenProps) {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: 24,
-    backgroundColor: '#f5f5f5',
-    alignItems: 'center',
-  },
-  codeLabel: {
-    fontSize: 16,
-    color: '#666',
-    marginTop: 20,
-  },
-  code: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    letterSpacing: 6,
-    color: '#333',
-    marginBottom: 32,
-  },
-  playersLabel: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#333',
-    alignSelf: 'flex-start',
-    marginBottom: 8,
-  },
-  list: {
-    width: '100%',
-    flexGrow: 0,
-    marginBottom: 24,
-  },
-  playerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#fff',
-    padding: 14,
-    borderRadius: 8,
-    marginBottom: 8,
-  },
-  playerName: {
-    fontSize: 16,
-    color: '#333',
-  },
-  hostBadge: {
-    backgroundColor: '#FF9800',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  hostBadgeText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  button: {
-    width: '100%',
-    padding: 16,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  startButton: {
-    backgroundColor: '#4CAF50',
-  },
-  leaveButton: {
-    backgroundColor: '#f44336',
-  },
-  disabledButton: {
-    opacity: 0.5,
-  },
-  buttonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-});
+const createStyles = (colors: Colors, shadows: Shadows) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      padding: 24,
+      backgroundColor: colors.paper,
+      alignItems: 'center',
+    },
+    emptyText: {
+      fontSize: 16,
+      color: colors.mutedInk,
+      fontFamily: fonts.sans,
+    },
+    codeCard: {
+      width: '100%',
+      backgroundColor: colors.card,
+      borderWidth: 2,
+      borderColor: colors.ink,
+      borderRadius: 6,
+      paddingVertical: 16,
+      paddingHorizontal: 16,
+      alignItems: 'center',
+      marginTop: 10,
+      marginBottom: 24,
+      ...shadows.hard,
+    },
+    codeLabel: {
+      fontSize: 12,
+      color: colors.mutedInk,
+      textTransform: 'uppercase',
+      letterSpacing: 1,
+      fontFamily: fonts.sans,
+    },
+    code: {
+      fontSize: 32,
+      fontWeight: '800',
+      letterSpacing: 6,
+      color: colors.ink,
+      fontFamily: fonts.mono,
+    },
+    playersLabel: {
+      fontSize: 16,
+      fontWeight: '700',
+      color: colors.ink,
+      alignSelf: 'flex-start',
+      marginBottom: 8,
+      textTransform: 'uppercase',
+      letterSpacing: 0.8,
+      fontFamily: fonts.sans,
+    },
+    list: {
+      width: '100%',
+      flexGrow: 0,
+      marginBottom: 24,
+    },
+    playerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      backgroundColor: colors.card,
+      padding: 14,
+      borderRadius: 6,
+      marginBottom: 8,
+      borderWidth: 2,
+      borderColor: colors.ink,
+      ...shadows.soft,
+    },
+    playerName: {
+      fontSize: 16,
+      color: colors.ink,
+      fontFamily: fonts.sans,
+      fontWeight: '600',
+    },
+    hostBadge: {
+      backgroundColor: colors.highlight,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 4,
+      borderWidth: 2,
+      borderColor: colors.ink,
+    },
+    hostBadgeText: {
+      color: colors.buttonText,
+      fontSize: 12,
+      fontWeight: '800',
+      fontFamily: fonts.sans,
+      letterSpacing: 0.6,
+    },
+    button: {
+      width: '100%',
+      paddingVertical: 14,
+      borderRadius: 6,
+      alignItems: 'center',
+      marginBottom: 12,
+      borderWidth: 2,
+      borderColor: colors.ink,
+      ...shadows.hard,
+    },
+    startButton: {
+      backgroundColor: colors.highlight,
+    },
+    leaveButton: {
+      backgroundColor: colors.danger,
+    },
+    disabledButton: {
+      opacity: 0.5,
+    },
+    buttonText: {
+      color: colors.buttonText,
+      fontSize: 18,
+      fontWeight: '800',
+      fontFamily: fonts.sans,
+      textTransform: 'uppercase',
+      letterSpacing: 0.6,
+    },
+  });
